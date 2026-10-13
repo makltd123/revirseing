@@ -164,3 +164,129 @@ const out = (name) => new URL(`./fixtures/${name}`, import.meta.url);
   writeFileSync(out('broken-xref.pdf'), Buffer.from(pdf, 'latin1'));
   console.log('wrote broken-xref.pdf', Buffer.byteLength(pdf, 'latin1'), 'bytes');
 }
+
+// ---- Helper: assemble a classic-xref PDF from a list of object bodies -----
+// objects is { num: Buffer|string }, rootNum names the /Catalog.
+function buildPdf(objects, rootNum, version = '1.4') {
+  const header = Buffer.from(`%PDF-${version}\n%\xE2\xE3\xCF\xD3\n`, 'latin1');
+  const chunks = [header];
+  const offsets = {};
+  let pos = header.length;
+  const nums = Object.keys(objects).map(Number).sort((a, b) => a - b);
+  for (const n of nums) {
+    offsets[n] = pos;
+    const body = Buffer.isBuffer(objects[n]) ? objects[n] : Buffer.from(objects[n], 'latin1');
+    const b = Buffer.concat([
+      Buffer.from(`${n} 0 obj\n`, 'latin1'),
+      body,
+      Buffer.from('\nendobj\n', 'latin1'),
+    ]);
+    chunks.push(b);
+    pos += b.length;
+  }
+  const maxNum = nums[nums.length - 1];
+  const xrefStart = pos;
+  let xref = `xref\n0 ${maxNum + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= maxNum; i++) {
+    const off = offsets[i];
+    xref += off === undefined
+      ? '0000000000 65535 f \n'
+      : `${String(off).padStart(10, '0')} 00000 n \n`;
+  }
+  xref += `trailer\n<< /Size ${maxNum + 1} /Root ${rootNum} 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  chunks.push(Buffer.from(xref, 'latin1'));
+  return Buffer.concat(chunks);
+}
+
+function stream(dictStr, data) {
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1');
+  return Buffer.concat([
+    Buffer.from(`<< ${dictStr} /Length ${bytes.length} >>\nstream\n`, 'latin1'),
+    bytes,
+    Buffer.from('\nendstream', 'latin1'),
+  ]);
+}
+
+// Every code 500/1000 em wide, so advances are exactly 0.5 * fontSize.
+const UNIFORM_WIDTHS = `/FirstChar 0 /Widths [${Array(256).fill(500).join(' ')}]`;
+
+// ---- 5. Encodings: WinAnsi + /Differences, and a Type0 CMap font ---------
+{
+  const toUnicodeCMap = `/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CMapName /Test-UCS2 def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+6 beginbfchar
+<0001> <041F>
+<0002> <0440>
+<0003> <0438>
+<0004> <0432>
+<0005> <0435>
+<0006> <0442>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end`;
+
+  // F1: WinAnsi base with /Differences remapping codes 200 and 201.
+  // F2: Type0 / Identity-H, two-byte codes resolved through /ToUnicode.
+  const content = [
+    'BT /F1 12 Tf 72 700 Td (WinAnsi high byte: \\351) Tj ET',       // 0xE9 -> e-acute
+    'BT /F1 12 Tf 72 680 Td (Differences: \\310\\311) Tj ET',        // 200,201 -> bullet, eacute
+    'BT /F2 14 Tf 72 650 Td <000100020003000400050006> Tj ET',      // CID -> Privet (Cyrillic)
+  ].join('\n');
+
+  const pdf = buildPdf({
+    1: '<< /Type /Catalog /Pages 2 0 R >>',
+    2: '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    3: '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>',
+    4: stream('', content),
+    5: `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica ${UNIFORM_WIDTHS} /Encoding << /BaseEncoding /WinAnsiEncoding /Differences [200 /bullet /eacute] >> >>`,
+    6: '<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [7 0 R] /ToUnicode 8 0 R >>',
+    7: '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /TestCID /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 1000 >>',
+    8: stream('', toUnicodeCMap),
+  }, 1, '1.4');
+  writeFileSync(out('encodings.pdf'), pdf);
+  console.log('wrote encodings.pdf', pdf.length, 'bytes');
+}
+
+// ---- 6. Layout: TJ gaps, Tm placement, Form XObject, two pages -----------
+{
+  // Page 1: a TJ array with a kerning nudge (should NOT add a space) and a
+  // wide gap (should). Then two columns placed with Tm, and a form XObject.
+  const page1 = [
+    // kerning nudge of -20/1000 em: too small to be a space
+    'BT /F1 10 Tf 72 700 Td [(Kern) -20 (ed)] TJ ET',
+    // -2000/1000 em = 2 em gap at 10pt = 20pt: clearly a space
+    'BT /F1 10 Tf 72 680 Td [(Wide) -2000 (gap)] TJ ET',
+    // two columns on the same baseline, placed absolutely
+    'BT /F1 10 Tf 1 0 0 1 72 660 Tm (Left column) Tj ET',
+    'BT /F1 10 Tf 1 0 0 1 300 660 Tm (Right column) Tj ET',
+    // leading + T* produces the next line
+    'BT /F1 10 Tf 14 TL 72 640 Td (First line) Tj T* (Second line) Tj ET',
+    // a form XObject, translated down by cm
+    'q 1 0 0 1 72 600 cm /Fx Do Q',
+  ].join('\n');
+
+  const formContent = 'BT /F1 10 Tf 0 0 Td (Inside a form XObject) Tj ET';
+  const page2 = 'BT /F1 10 Tf 72 700 Td (This is page two) Tj ET';
+
+  const pdf = buildPdf({
+    1: '<< /Type /Catalog /Pages 2 0 R >>',
+    2: '<< /Type /Pages /Kids [3 0 R 9 0 R] /Count 2 /Resources << /Font << /F1 5 0 R >> >> >>',
+    3: '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Fx 6 0 R >> >> /Contents 4 0 R >>',
+    4: stream('', page1),
+    5: `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica ${UNIFORM_WIDTHS} /Encoding /WinAnsiEncoding >>`,
+    6: stream('/Type /XObject /Subtype /Form /BBox [0 0 300 20] /Resources << /Font << /F1 5 0 R >> >>', formContent),
+    // page 2 inherits /Resources from the page tree node (object 2)
+    9: '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 10 0 R >>',
+    10: stream('', page2),
+  }, 1, '1.4');
+  writeFileSync(out('layout.pdf'), pdf);
+  console.log('wrote layout.pdf', pdf.length, 'bytes');
+}

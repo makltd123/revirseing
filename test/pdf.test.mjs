@@ -74,3 +74,121 @@ test('filters: ASCIIHex, ASCII85 and RunLength round-trips (via decodeStream sha
   assert.equal(decodeStream(mk('ASCIIHexDecode', '48656c6c6f>')).data.toString('latin1'), 'Hello');
   assert.equal(decodeStream(mk('ASCII85Decode', '87cURD_*#4DfTZ)+T~>')).data.toString('latin1'), 'Hello, World!');
 });
+
+// --- text extraction ------------------------------------------------------
+
+import { extractText, assembleLines } from '../src/text.js';
+import { parseCMap } from '../src/font.js';
+import { glyphToUnicode, Encodings } from '../src/encodings.js';
+
+test('text: simple page', () => {
+  const r = extractText(read('simple.pdf'));
+  assert.equal(r.pages.length, 1);
+  assert.equal(r.pages[0].text, 'Hello, revirseing!');
+});
+
+test('text: FlateDecode content yields both lines in order', () => {
+  const r = extractText(read('flate.pdf'));
+  assert.deepEqual(r.pages[0].text.split('\n'), [
+    'Compressed stream line one',
+    'and line two',
+  ]);
+});
+
+test('text: content reached through an object stream', () => {
+  const r = extractText(read('xrefstream.pdf'));
+  assert.equal(r.pages[0].text, 'Object stream + xref stream');
+});
+
+test('text: WinAnsi high bytes and /Differences remapping', () => {
+  const r = extractText(read('encodings.pdf'));
+  const lines = r.pages[0].text.split('\n');
+  assert.equal(lines[0], 'WinAnsi high byte: é'); // 0xE9 -> é
+  assert.equal(lines[1], 'Differences: •é'); // 200 -> bullet, 201 -> eacute
+});
+
+test('text: Type0 Identity-H two-byte codes via /ToUnicode', () => {
+  const r = extractText(read('encodings.pdf'));
+  const lines = r.pages[0].text.split('\n');
+  assert.equal(lines[2], 'Привет'); // Привет
+});
+
+test('text: kerning nudge does not become a space, a wide gap does', () => {
+  const r = extractText(read('layout.pdf'), { pageNumbers: [1] });
+  const lines = r.pages[0].text.split('\n');
+  assert.equal(lines[0], 'Kerned', 'small TJ adjustment must not insert a space');
+  assert.match(lines[1], /^Wide\s+gap$/, 'wide TJ adjustment must insert a space');
+});
+
+test('text: Tm-placed columns share a line; TL/T* start a new one', () => {
+  const r = extractText(read('layout.pdf'), { pageNumbers: [1] });
+  const lines = r.pages[0].text.split('\n');
+  assert.match(lines[2], /Left column\s+Right column/);
+  assert.equal(lines[3], 'First line');
+  assert.equal(lines[4], 'Second line');
+});
+
+test('text: form XObject content is included', () => {
+  const r = extractText(read('layout.pdf'), { pageNumbers: [1] });
+  assert.match(r.pages[0].text, /Inside a form XObject/);
+});
+
+test('text: page selection and inherited /Resources', () => {
+  const all = extractText(read('layout.pdf'));
+  assert.equal(all.pages.length, 2);
+  const second = extractText(read('layout.pdf'), { pageNumbers: [2] });
+  assert.equal(second.pages.length, 1);
+  assert.equal(second.pages[0].page, 2);
+  // Page 2 declares no /Resources of its own; the font is inherited.
+  assert.equal(second.pages[0].text, 'This is page two');
+});
+
+test('parseCMap reads bfchar and codespacerange', () => {
+  const cmap = `1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+2 beginbfchar
+<0041> <0410>
+<0042> <0411>
+endbfchar`;
+  const { map, codeBytes } = parseCMap(Buffer.from(cmap, 'latin1'));
+  assert.equal(codeBytes, 2);
+  assert.equal(map.get(0x41), 'А');
+  assert.equal(map.get(0x42), 'Б');
+});
+
+test('parseCMap expands bfrange', () => {
+  const cmap = `1 beginbfrange
+<0010> <0012> <0041>
+endbfrange`;
+  const { map } = parseCMap(Buffer.from(cmap, 'latin1'));
+  assert.equal(map.get(0x10), 'A');
+  assert.equal(map.get(0x11), 'B');
+  assert.equal(map.get(0x12), 'C');
+});
+
+test('glyph names resolve through the AGL subset and uniXXXX', () => {
+  assert.equal(glyphToUnicode('eacute'), 'é');
+  assert.equal(glyphToUnicode('uni0416'), 'Ж');
+  assert.equal(glyphToUnicode('u1F600'), '\u{1F600}');
+  assert.equal(glyphToUnicode('bullet'), '•');
+  assert.equal(glyphToUnicode('g42'), null, 'opaque glyph ids carry no Unicode');
+});
+
+test('encodings expose the documented high-range mappings', () => {
+  assert.equal(Encodings.WinAnsiEncoding.get(0x92), '’');
+  assert.equal(Encodings.MacRomanEncoding.get(0x8e), 'é');
+  assert.equal(Encodings.StandardEncoding.get(0x27), '’');
+});
+
+test('assembleLines orders top-to-bottom then left-to-right', () => {
+  const items = [
+    { x: 100, y: 500, text: 'second', width: 30, fontSize: 10, spaceWidth: 2.5 },
+    { x: 10, y: 700, text: 'first', width: 20, fontSize: 10, spaceWidth: 2.5 },
+    { x: 10, y: 500, text: 'line', width: 15, fontSize: 10, spaceWidth: 2.5 },
+  ];
+  const lines = assembleLines(items);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].text, 'first');
+  assert.match(lines[1].text, /^line\s+second$/);
+});
