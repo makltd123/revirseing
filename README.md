@@ -1,9 +1,10 @@
 # revirseing
 
 A from-scratch PDF toolkit. It reads a PDF the way the format actually works —
-parsing the byte-level object syntax, the cross-reference data, and the stream
-filters by hand — and reports the file's structure. No PDF library is used for
-parsing; the only external code is Node's built-in `zlib` for FlateDecode.
+parsing the byte-level object syntax, the cross-reference data, the stream
+filters, the content-stream operators and the font encodings by hand — then
+reports the file's structure and extracts its text. No PDF library is used;
+the only external code is Node's built-in `zlib` for FlateDecode.
 
 This is a learning-grade reverse-engineering tool aimed at an **open standard**
 (ISO 32000 / the PDF format). Understanding and reimplementing a documented
@@ -32,6 +33,11 @@ revirseing inspect <file.pdf>            Summarize structure
 revirseing inspect <file.pdf> --objects  …and list every object
 revirseing inspect <file.pdf> --object N Show one object, decoding its stream
 revirseing inspect <file.pdf> --json     Machine-readable output
+
+revirseing text <file.pdf>               Extract text, page by page
+revirseing text <file.pdf> --page 2      One page (also 1,3-5)
+revirseing text <file.pdf> --quiet       Text only, no headers or warnings
+revirseing text <file.pdf> --json        Text with per-line positions
 ```
 
 ### Example
@@ -61,6 +67,24 @@ Pages
     page   0  mediaBox [0 0 612 792]  contents:yes
 ```
 
+### Text extraction
+
+```
+$ revirseing text report.pdf --page 1
+Chromium Skia Producer
+Body text with bold, italic and monospace runs inline.
+Column A  Column B
+Alpha content here.  Beta content here.
+Key  Value
+Ratio  3.14159
+```
+
+A content stream has no notion of lines or words, so reading order is
+reconstructed from geometry: fragments are clustered by baseline, ordered left
+to right, and a space is inserted where the horizontal gap is wide enough to be
+one. A small `TJ` kerning nudge therefore stays inside a word, while a real gap
+becomes a space.
+
 ## What it understands
 
 - **Object syntax** — the 8 COS object kinds: null, boolean, number, string
@@ -76,6 +100,16 @@ Pages
   works on damaged files.
 - **Page tree** — walks `/Pages` into a flat list of pages with inherited
   attributes.
+- **Content streams** — the operators that place text: `BT`/`ET`, `Tf`, `Td`,
+  `TD`, `Tm`, `T*`, `TL`, `Tc`, `Tw`, `Tz`, `Ts`, `Tr`, `Tj`, `TJ`, `'`, `"`,
+  the `cm` / `q` / `Q` graphics state, recursion into Form XObjects via `Do`,
+  and skipping inline-image payloads (`BI`…`ID`…`EI`).
+- **Fonts and encodings** — `/ToUnicode` CMaps (`bfchar` and `bfrange`), the
+  WinAnsi, MacRoman and Standard base encodings, `/Encoding` `/Differences`
+  with an Adobe Glyph List subset plus the algorithmic `uniXXXX` forms, and
+  composite Type0 fonts with two-byte CID codes. Glyph widths come from
+  `/Widths` or a CIDFont's `/W` and `/DW`, with a fallback for the standard 14
+  fonts that ship no widths.
 
 ## Architecture
 
@@ -85,6 +119,10 @@ Pages
 | `src/parser.js` | Recursive-descent parser assembling COS objects |
 | `src/model.js` | The COS object model and small helpers |
 | `src/filters.js` | Stream decode filters and predictors |
+| `src/content.js` | Content-stream interpreter and text positioning |
+| `src/font.js` | Font decoding, CMap parsing, glyph widths |
+| `src/encodings.js` | Base encodings and glyph-name to Unicode mapping |
+| `src/text.js` | Line assembly and the `text` command |
 | `src/document.js` | Cross-reference loading, resolution, page tree, recovery |
 | `src/inspect.js` | The `inspect` command |
 | `src/format.js` | Rendering objects for display |
@@ -97,17 +135,46 @@ npm test
 ```
 
 Fixtures are generated (not checked in as opaque blobs) by
-`test/make-fixtures.mjs`, which writes four PDFs by hand — a minimal classic
-file, a FlateDecode file, a PDF 1.5 file using an xref stream and an object
-stream, and a file with a deliberately broken `startxref` — so the tests
-exercise the reader end-to-end against known bytes.
+`test/make-fixtures.mjs`, which writes six PDFs by hand so the tests exercise
+the reader end-to-end against known bytes:
+
+| Fixture | What it covers |
+| --- | --- |
+| `simple.pdf` | minimal classic xref table and trailer |
+| `flate.pdf` | a FlateDecode content stream |
+| `xrefstream.pdf` | PDF 1.5 xref stream with objects inside an object stream |
+| `broken-xref.pdf` | a deliberately broken `startxref`, forcing recovery |
+| `encodings.pdf` | WinAnsi high bytes, `/Differences`, and a Type0 font whose two-byte codes resolve through a `/ToUnicode` CMap |
+| `layout.pdf` | `TJ` kerning vs. word gaps, `Tm`-placed columns, `TL`/`T*` leading, a Form XObject, and a page inheriting `/Resources` |
+
+### Checked against other implementations
+
+Text extraction was also run against PDFs from four unrelated producers — a
+10-page themed document, LibreOffice 7 (PDF 1.7, CID fonts), ReportLab (PDF
+1.3, standard-14 fonts with no `/Widths`), and headless Chromium (Skia) — and
+compared with `pypdf`. The multiset of extracted words was **identical in every
+case** (631, 47, 34 and 34 words respectively).
+
+The one intended difference is reading order in multi-column blocks: `pypdf`
+follows content-stream order, while `revirseing` groups fragments by baseline,
+so text sharing a baseline shares a line.
+
+## Limitations
+
+- **Encrypted documents** are detected and reported, but strings and streams
+  are not decrypted, so their text will not come out.
+- **Reading order** is geometric. Rotated text, and text set along a curve or
+  in overlapping layers, will not group the way a human reads it.
+- **CID fonts with no `/ToUnicode`** carry no recoverable Unicode; those codes
+  are dropped rather than guessed.
+- Image filters (`DCTDecode`, `JPXDecode`, `CCITTFaxDecode`, `JBIG2Decode`)
+  are reported but not decoded — there is no text in them.
 
 ## Roadmap
 
-- `text` command: extract page text from content streams (`BT`/`Tj`/`TJ`/`ET`),
-  resolving font encodings.
 - Encrypted-document handling (RC4 / AES) for the standard security handler.
 - `/Metadata` (XMP) and `/Info` dictionary reporting.
+- `--layout` mode preserving column structure instead of joining baselines.
 
 ## License
 

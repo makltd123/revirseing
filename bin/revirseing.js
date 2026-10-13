@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { inspect, inspectObject } from '../src/inspect.js';
+import { extractText } from '../src/text.js';
 
 function main(argv) {
   const args = argv.slice(2);
@@ -20,6 +21,10 @@ function main(argv) {
 
   if (cmd === 'inspect') {
     return cmdInspect(args.slice(1));
+  }
+
+  if (cmd === 'text') {
+    return cmdText(args.slice(1));
   }
 
   process.stderr.write(`Unknown command: ${cmd}\n`);
@@ -55,6 +60,67 @@ function cmdInspect(args) {
   } else {
     renderReport(report, { objects: opts.objects });
   }
+}
+
+function cmdText(args) {
+  const opts = parseOpts(args, {
+    flags: ['json', 'quiet'],
+    values: ['page'],
+  });
+  const file = opts._[0];
+  if (!file) {
+    process.stderr.write('text: missing <file.pdf>\n');
+    process.exit(1);
+  }
+  const buf = readFileSync(file);
+  const pageNumbers = opts.page ? parsePageList(opts.page) : null;
+  const result = extractText(buf, { pageNumbers });
+
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    return;
+  }
+
+  if (result.encrypted && !opts.quiet) {
+    process.stderr.write('warning: document is encrypted; text may be unavailable\n');
+  }
+  for (const p of result.pages) {
+    if (result.pages.length > 1 && !opts.quiet) {
+      process.stdout.write(`\n=== page ${p.page} ===\n`);
+    }
+    process.stdout.write(p.text + '\n');
+  }
+  if (!opts.quiet && result.warnings.length) {
+    for (const w of dedupe(result.warnings)) process.stderr.write(`warning: ${w}\n`);
+  }
+}
+
+// "3" | "1,4,7" | "2-5" | "1,3-5"
+function parsePageList(spec) {
+  const out = new Set();
+  for (const part of String(spec).split(',')) {
+    const m = /^(\d+)\s*-\s*(\d+)$/.exec(part.trim());
+    if (m) {
+      const a = parseInt(m[1], 10);
+      const b = parseInt(m[2], 10);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) out.add(i);
+    } else {
+      const n = parseInt(part.trim(), 10);
+      if (!Number.isNaN(n)) out.add(n);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+function dedupe(list) {
+  const seen = new Set();
+  const out = [];
+  for (const x of list) {
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+  }
+  return out;
 }
 
 function renderReport(r, { objects }) {
@@ -159,6 +225,11 @@ Usage:
   revirseing inspect <file.pdf> --objects  …and list every object
   revirseing inspect <file.pdf> --object N Show one object (decoded)
   revirseing inspect <file.pdf> --json     Machine-readable output
+
+  revirseing text <file.pdf>               Extract text, page by page
+  revirseing text <file.pdf> --page 2      One page (or 1,3-5)
+  revirseing text <file.pdf> --quiet       Text only, no headers or warnings
+  revirseing text <file.pdf> --json        Text with line positions
 `);
 }
 
