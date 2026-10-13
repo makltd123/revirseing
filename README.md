@@ -217,6 +217,14 @@ become blank lines, so side-by-side columns stay side by side.
 - Public-key security handler (`/Adobe.PubSec`).
 - Re-encrypting on save, so encrypted documents can be edited too.
 
+## Browser reading mode
+
+`browser/` contains **Quiet Reader**, a reading-mode app that runs this engine
+entirely in the browser: drop a PDF and read its extracted text, with search
+and copy, with nothing uploaded. The same `src/` code is bundled for the
+browser with `node:zlib` swapped for `pako`; see [browser/README.md](browser/README.md)
+to build it. Open `browser/index.html` after building, or serve the folder.
+
 ## License
 
 [MIT](LICENSE). Node's `zlib` is used under its own license.

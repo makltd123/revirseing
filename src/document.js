@@ -30,6 +30,8 @@ export class PDFDocument {
   }
 
   static load(buf, { password = '' } = {}) {
+    // Accept a Uint8Array (e.g. from the browser) as well as a Node Buffer.
+    if (typeof Buffer !== 'undefined' && !Buffer.isBuffer(buf)) buf = Buffer.from(buf);
     const doc = new PDFDocument(buf);
     doc.password = password;
     doc._readVersion();
