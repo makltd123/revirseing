@@ -1,0 +1,402 @@
+<title>Quiet Reader</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: a slim sticky control bar over one centered reading column. */
+  :root {
+    --paper: #faf8f3;
+    --ink: #221e18;
+    --muted: #726a5e;
+    --rule: #e7e0d3;
+    --panel: #f2ede3;
+    --accent: #0f6d66;
+    --mark: #ffdf9e;
+    --mark-ink: #3a2c00;
+    --mark-active: #ff9e3d;
+    --reading: 1.18rem;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #13110d; --ink: #e9e3d6; --muted: #9a9183; --rule: #2b2720;
+      --panel: #1c1913; --accent: #5cbcb2; --mark: #5a4512; --mark-ink: #ffe8b8;
+      --mark-active: #c98a2a; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #13110d; --ink: #e9e3d6; --muted: #9a9183; --rule: #2b2720;
+    --panel: #1c1913; --accent: #5cbcb2; --mark: #5a4512; --mark-ink: #ffe8b8;
+    --mark-active: #c98a2a; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); }
+
+  .bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10;
+    display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+    padding: .55rem clamp(.75rem, 4vw, 1.25rem);
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .brand { font-weight: 600; letter-spacing: .02em; margin-right: .25rem; white-space: nowrap; }
+  .brand .dot { color: var(--accent); }
+  .doc-name { color: var(--muted); font-size: .82rem; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 1 1 8rem; }
+  .spacer { flex: 1 1 auto; }
+
+  .search { position: relative; display: flex; align-items: center; }
+  .search input {
+    font: inherit; font-size: .85rem; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--rule); border-radius: 999px; padding: .32rem .7rem; width: min(42vw, 13rem);
+  }
+  .search input::placeholder { color: var(--muted); }
+  .search .count { font-size: .72rem; color: var(--muted); margin: 0 .35rem; min-width: 2.6rem; text-align: center;
+    font-variant-numeric: tabular-nums; }
+
+  .btn {
+    font: inherit; font-size: .82rem; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--rule); border-radius: 8px; padding: .32rem .6rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: .3rem; line-height: 1;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible, .search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .iconbtn { padding: .32rem .5rem; min-width: 2rem; justify-content: center; }
+  .group { display: inline-flex; gap: .25rem; }
+
+  main { max-width: 42rem; margin: 0 auto; padding: 0 clamp(1rem, 5vw, 2rem); }
+
+  .drop {
+    margin: clamp(1.5rem, 6vw, 3rem) auto; padding: clamp(1.5rem, 5vw, 2.5rem);
+    border: 1.5px dashed var(--rule); border-radius: 14px; text-align: center;
+    background: var(--panel); transition: border-color .15s, background .15s;
+  }
+  .drop.drag { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+  .drop h1 { font-family: var(--serif); font-weight: 600; font-size: 1.5rem; margin: .2rem 0 .5rem;
+    text-wrap: balance; }
+  .drop p { color: var(--muted); font-size: .9rem; margin: .4rem auto; max-width: 30rem; line-height: 1.5; }
+  .drop .privacy { color: var(--accent); font-weight: 500; }
+  .drop .actions { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 500;
+    padding: .5rem 1rem; }
+  :root[data-theme="dark"] .btn.primary, :root:not([data-theme="light"]) .btn.primary { color: #06100f; }
+
+  .docmeta { text-align: center; color: var(--muted); font-size: .82rem; margin: 1.25rem 0 .25rem;
+    display: flex; gap: .5rem 1rem; justify-content: center; flex-wrap: wrap; }
+  .docmeta .title { color: var(--ink); font-weight: 500; }
+
+  .note { margin: 1rem 0; padding: .7rem .9rem; border-left: 3px solid var(--accent);
+    background: var(--panel); border-radius: 0 8px 8px 0; font-size: .85rem; color: var(--muted); }
+  .note strong { color: var(--ink); }
+
+  .page { padding: 1.5rem 0 1.75rem; border-top: 1px solid var(--rule); }
+  .page:first-of-type { border-top: none; }
+  .page .label { font-family: var(--sans); font-size: .7rem; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
+  .page .label::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+  .reading p {
+    font-family: var(--serif); font-size: var(--reading); line-height: 1.65; margin: 0 0 1.05em;
+    color: var(--ink); text-wrap: pretty; overflow-wrap: break-word;
+  }
+  .reading .empty { font-family: var(--sans); font-size: .85rem; color: var(--muted); font-style: italic; }
+  mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; padding: 0 .05em; }
+  mark.on { background: var(--mark-active); color: #000; }
+
+  footer { max-width: 42rem; margin: 0 auto; padding: 2rem clamp(1rem, 5vw, 2rem) 3rem;
+    color: var(--muted); font-size: .76rem; line-height: 1.5; border-top: 1px solid var(--rule); }
+  footer code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .95em; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+  html { scroll-behavior: smooth; }
+</style>
+
+<div class="bar">
+  <span class="brand">Quiet<span class="dot">.</span>Reader</span>
+  <span class="doc-name" id="docName" hidden></span>
+  <span class="spacer"></span>
+  <span class="search" id="searchWrap" hidden>
+    <input id="search" type="search" placeholder="Search text" aria-label="Search text" autocomplete="off">
+    <span class="count" id="searchCount"></span>
+    <span class="group">
+      <button class="btn iconbtn" id="prevMatch" title="Previous match" aria-label="Previous match">&uarr;</button>
+      <button class="btn iconbtn" id="nextMatch" title="Next match" aria-label="Next match">&darr;</button>
+    </span>
+  </span>
+  <span class="group">
+    <button class="btn iconbtn" id="smaller" title="Smaller text" aria-label="Smaller text">A&minus;</button>
+    <button class="btn iconbtn" id="bigger" title="Larger text" aria-label="Larger text">A+</button>
+  </span>
+  <button class="btn iconbtn" id="theme" title="Theme" aria-label="Toggle theme">Auto</button>
+  <button class="btn" id="openBtn">Open PDF</button>
+  <input id="file" type="file" accept="application/pdf,.pdf" hidden>
+</div>
+
+<main id="main">
+  <section class="drop" id="drop">
+    <h1>Read a PDF, quietly</h1>
+    <p>Drop a PDF here, or open one. It is read into clean, flowing text you can search and copy.</p>
+    <p class="privacy">Everything runs in your browser. Your file never leaves this page.</p>
+    <div class="actions">
+      <button class="btn primary" id="openBtn2">Open a PDF</button>
+      <button class="btn" id="sampleBtn">Read the sample</button>
+    </div>
+  </section>
+  <div id="doc"></div>
+</main>
+
+<footer>
+  Text is extracted by a from-scratch PDF engine running entirely in your browser — no upload, no server.
+  Scanned PDFs that contain only page images have no text to extract. Encrypted PDFs are not opened here.
+</footer>
+
+<script src="rea.bundle.js"></script>
+<script>
+(function () {
+  "use strict";
+  var SAMPLE_B64 = "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUiAvRjMgNCAwIFIgL0Y0IDUgMCBSCj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nIC9OYW1lIC9GMSAvU3VidHlwZSAvVHlwZTEgL1R5cGUgL0ZvbnQKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL0Jhc2VGb250IC9IZWx2ZXRpY2EtQm9sZCAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjIgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iago0IDAgb2JqCjw8Ci9CYXNlRm9udCAvVGltZXMtUm9tYW4gL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YzIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNSAwIG9iago8PAovQmFzZUZvbnQgL1RpbWVzLUl0YWxpYyAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjQgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iago2IDAgb2JqCjw8Ci9Db250ZW50cyAxMCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA5IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgOSAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0F1dGhvciAocmV2aXJzZWluZykgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTAxMzIwMzU1MSswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTAxMzIwMzU1MSswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoQSBTYW1wbGUgRG9jdW1lbnQpIC9UcmFwcGVkIC9GYWxzZQo+PgplbmRvYmoKOSAwIG9iago8PAovQ291bnQgMSAvS2lkcyBbIDYgMCBSIF0gL1R5cGUgL1BhZ2VzCj4+CmVuZG9iagoxMCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCAxMjYyCj4+CnN0cmVhbQpHYXNhbmdRKCNYJSI3JDpAJU9BTUNyYSxnU01oInRbY21obyFxWyotSDFCJ0tVOTFDQE5BPDpuZVVRSm9PWShwTENjM3RUPyYlRGAlaEdZLFFNQUdYXk0mRlBoOWJKQ1IsV2NXNCxVQDU3W2pxXHFyWyY0OW1qNk9ZODIlV1gjUWtzUTdlSXBccTIjYVFmNlRiRFwrKGBKZyptQEotZE1wJCgpdE4vbCdqNj5vS25kXip0TUJWaVJrQkM4UTNQa1NuRjwvVChLXGMmWF0yQzU9Rz9fWEIiQ1hPXztyYlUhLiQ5STJqUltbJ21lOXIva1FDPHFSNlU2NkpFM2NDOzhWSHFQcTpQM1tlKWNeb01jSHN1MjwyYyomMUtBJTthLk1mQWFLZDk5bCdBdE1IZGswSjk4SVdGKTlda0JGUE4kblJFU0V0L1haVk5SdTU+Wl5SZkpLJko0cWRZY0AwbWdmYClLLTNrK0wqUzNDLC1IVVJraEFSTkZxaUlVPEcmWWoyMm8ucHQ+Kz8mOjYhXXBiOz43R0FUbTdrWShaKkkoJD9ec1tTPDJuYWpfOEBCUGkvP2wuSideZ0NMLC5XZGpYXTEnTSxyRytKZWAtK1prQzttVT0rIjM0XmFiK2JBTFUmMzpSJmFnPEFLPi4qSjZuIW0tQHEybWwxITZqPmJbRS45UU1OMD85cTVWODpwKy5fPFgpRzxXbDNJakBIKj50IS9tPlBuOlFLPVFqTCVGRzVfLj4/Yjk/R1tmXSg7KD5ZSClNYj5pblYmXXRqMzhqMSZcTWwlXzZCbXRkQW47SllYI2RBciZWK1UkP1Q/JjA3ayY/OykkJldPMkJMWzo5K1lXQXQhaGlAKkBpbDhwMEowU1NANFsjWVtAYDlpZSkxZC9VNFl1OkQlTykyImRRK2czdWAkRVNgLnJmcW9WaUZrclFcU2pfLFMya1pSQ14wJSIhQ0ZMR0FkXC88NT9JXidfUlJfWWNoIkZSKmo1OVYmRCRdPmotQyxEc0k3UEdbaFhwSjBMLXFuITcxWChGWzlOOSMxV0ssSjlLKjlMQEYkM01AJ11FZyFsNTV1V0ksRjEvSFRNPiFtKTsqMjpzSS42JSYoJSojPiMjZThuaUw+KFI5czArSUxMcERRTCVbQjB1Kz0/aWtzMixUJFs5RzYmJ1tMSldSRl8pL2IoTXJpTlYtKz5hMFUvLidKOVJqKipMSF9NKEUsLSEmN3M1USFgQkdoZks5aFFycmYuIlFmQzxxUls4KClhM2QsPl9Hbi4nRSItOGBlQUloRDUlQkVWLFwkMyw6bD5rQ0RYQ2lmPjkkVCVgP1c3MF0jc0RAa2MnTz5KYWNbJyglJDJnaUxGSzYqTlU4XjFpUHNMMD4vJDxuKnUtc2FiLmFWN2p1bnMmKzsmXm88aDxaKCVFKC5DLkA3NlJCZj5UPyJqO0Y3Tz1JNE1WS1BlRTckQFVnTVBAU2M4NCRkL2dxT0o0JG1CUT5VWmIicC1IcEVZaGtrRENfWlRDTV9jTDYuQTtLXFgiN3NqUFsoVEhWNXVoaUFoWmdRT2tTNC1uN2VRNl8oOWghV0hLJFNvSnNJa1QhLVMrUy1wUi9vRUY7IWBbTWlJXkIpOy8+JFVCRVdadSFnLEczWU9mYjUrYzEoYS9qLk06J1J0TmhOJTp+PmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDExCjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA2MSAwMDAwMCBuIAowMDAwMDAwMTIyIDAwMDAwIG4gCjAwMDAwMDAyMjkgMDAwMDAgbiAKMDAwMDAwMDM0MSAwMDAwMCBuIAowMDAwMDAwNDUwIDAwMDAwIG4gCjAwMDAwMDA1NjAgMDAwMDAgbiAKMDAwMDAwMDc2NCAwMDAwMCBuIAowMDAwMDAwODMyIDAwMDAwIG4gCjAwMDAwMDExMTMgMDAwMDAgbiAKMDAwMDAwMTE3MiAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9JRCAKWzwxMWYwNDI4MTEzYWEzODk4MDc5NzI3MTc5YTA1MGExYj48MTFmMDQyODExM2FhMzg5ODA3OTcyNzE3OWEwNTBhMWI+XQolIFJlcG9ydExhYiBnZW5lcmF0ZWQgUERGIGRvY3VtZW50IC0tIGRpZ2VzdCAob3BlbnNvdXJjZSkKCi9JbmZvIDggMCBSCi9Sb290IDcgMCBSCi9TaXplIDExCj4+CnN0YXJ0eHJlZgoyNTI2CiUlRU9GCg==";
+
+  var els = {
+    doc: document.getElementById('doc'),
+    drop: document.getElementById('drop'),
+    docName: document.getElementById('docName'),
+    searchWrap: document.getElementById('searchWrap'),
+    search: document.getElementById('search'),
+    count: document.getElementById('searchCount'),
+    prev: document.getElementById('prevMatch'),
+    next: document.getElementById('nextMatch'),
+    file: document.getElementById('file'),
+  };
+
+  function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) { return null; } }
+
+  // --- Theme ---------------------------------------------------------------
+  var themeBtn = document.getElementById('theme');
+  var themeState = store('qr-theme') || 'auto';
+  function applyTheme() {
+    if (themeState === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', themeState);
+    themeBtn.textContent = themeState.charAt(0).toUpperCase() + themeState.slice(1);
+  }
+  themeBtn.addEventListener('click', function () {
+    themeState = themeState === 'auto' ? 'light' : themeState === 'light' ? 'dark' : 'auto';
+    store('qr-theme', themeState); applyTheme();
+  });
+  applyTheme();
+
+  // --- Reading size --------------------------------------------------------
+  var size = parseFloat(store('qr-size')) || 1.18;
+  function applySize() { document.documentElement.style.setProperty('--reading', size.toFixed(2) + 'rem'); }
+  document.getElementById('bigger').addEventListener('click', function () { size = Math.min(1.9, size + 0.08); store('qr-size', size); applySize(); });
+  document.getElementById('smaller').addEventListener('click', function () { size = Math.max(0.85, size - 0.08); store('qr-size', size); applySize(); });
+  applySize();
+
+  // --- Loading -------------------------------------------------------------
+  function b64ToBytes(b64) {
+    var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function median(a) { if (!a.length) return 0; var s = a.slice().sort(function (x, y) { return x - y; }); return s[Math.floor(s.length / 2)]; }
+
+  function toParagraphs(lines) {
+    if (!lines.length) return [];
+    var gaps = [];
+    for (var i = 1; i < lines.length; i++) gaps.push(Math.abs(lines[i - 1].y - lines[i].y));
+    var med = median(gaps) || 14;
+    var paras = [], cur = [];
+    for (var j = 0; j < lines.length; j++) {
+      if (j > 0) {
+        var gap = Math.abs(lines[j - 1].y - lines[j].y);
+        if (gap > med * 1.55 && cur.length) { paras.push(cur); cur = []; }
+      }
+      cur.push(lines[j].text);
+    }
+    if (cur.length) paras.push(cur);
+    return paras.map(function (ls) {
+      var out = '';
+      for (var k = 0; k < ls.length; k++) {
+        var t = ls[k];
+        if (k === 0) { out = t; continue; }
+        if (/[­-]$/.test(out)) out = out.replace(/[­-]$/, '') + t;
+        else out += ' ' + t;
+      }
+      return out;
+    });
+  }
+
+  var currentDoc = null;
+
+  function render(result, name, isSample) {
+    currentDoc = result;
+    els.drop.hidden = true;
+    els.doc.innerHTML = '';
+
+    els.docName.hidden = false;
+    els.docName.textContent = (result.title || name || 'Untitled') + (isSample ? '  ·  sample' : '');
+
+    var meta = document.createElement('div');
+    meta.className = 'docmeta';
+    var pageWord = result.pages.length === 1 ? 'page' : 'pages';
+    meta.innerHTML = '<span class="title"></span><span>' + result.pages.length + ' ' + pageWord + '</span>';
+    meta.querySelector('.title').textContent = result.title || name || 'Untitled document';
+    if (result.author) { var a = document.createElement('span'); a.textContent = 'by ' + result.author; meta.appendChild(a); }
+    els.doc.appendChild(meta);
+
+    if (result.encrypted && !result.decryptable) {
+      els.doc.appendChild(noteEl('This document is encrypted. ', 'Its text cannot be shown here.'));
+    }
+    var hasText = result.pages.some(function (p) { return p.lines.length; });
+    if (!hasText) {
+      els.doc.appendChild(noteEl('No text found. ', 'This PDF is likely a scan — its pages are images, not text.'));
+    }
+
+    result.pages.forEach(function (p) {
+      var sec = document.createElement('section');
+      sec.className = 'page';
+      var label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = 'Page ' + p.page;
+      sec.appendChild(label);
+      var reading = document.createElement('div');
+      reading.className = 'reading';
+      var paras = toParagraphs(p.lines);
+      if (!paras.length) {
+        var e = document.createElement('p'); e.className = 'empty'; e.textContent = 'No extractable text on this page.';
+        reading.appendChild(e);
+      } else {
+        paras.forEach(function (text) {
+          var para = document.createElement('p');
+          para.dataset.text = text;
+          para.textContent = text;
+          reading.appendChild(para);
+        });
+      }
+      sec.appendChild(reading);
+      els.doc.appendChild(sec);
+    });
+
+    els.searchWrap.hidden = false;
+    els.search.value = '';
+    clearSearch();
+    window.scrollTo(0, 0);
+  }
+
+  function noteEl(strong, rest) {
+    var n = document.createElement('div');
+    n.className = 'note';
+    var s = document.createElement('strong'); s.textContent = strong;
+    n.appendChild(s); n.appendChild(document.createTextNode(rest));
+    return n;
+  }
+
+  function showError(msg) {
+    els.drop.hidden = false;
+    els.doc.innerHTML = '';
+    var n = noteEl('Could not read this file. ', msg);
+    els.doc.appendChild(n);
+  }
+
+  function loadBytes(bytes, name, isSample) {
+    if (typeof REA === 'undefined') { showError('The reader engine did not load.'); return; }
+    try {
+      var result = REA.readDocument(bytes);
+      render(result, name, isSample);
+    } catch (e) {
+      showError(String(e && e.message || e));
+    }
+  }
+
+  function loadFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () { loadBytes(new Uint8Array(reader.result), file.name.replace(/\.pdf$/i, ''), false); };
+    reader.onerror = function () { showError('The file could not be read.'); };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // --- Search --------------------------------------------------------------
+  var marks = [], active = -1;
+  function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  function clearSearch() {
+    marks = []; active = -1; els.count.textContent = '';
+    var ps = els.doc.querySelectorAll('.reading p[data-text]');
+    ps.forEach(function (p) { p.textContent = p.dataset.text; });
+  }
+
+  function runSearch(q) {
+    var ps = els.doc.querySelectorAll('.reading p[data-text]');
+    marks = []; active = -1;
+    if (!q) { ps.forEach(function (p) { p.textContent = p.dataset.text; }); els.count.textContent = ''; return; }
+    var re = new RegExp(escapeRe(q), 'gi');
+    var total = 0;
+    ps.forEach(function (p) {
+      var text = p.dataset.text;
+      if (!re.test(text)) { p.textContent = text; return; }
+      re.lastIndex = 0;
+      var html = '', last = 0, m;
+      while ((m = re.exec(text))) {
+        html += escapeHtml(text.slice(last, m.index)) + '<mark>' + escapeHtml(m[0]) + '</mark>';
+        last = m.index + m[0].length;
+        if (m.index === re.lastIndex) re.lastIndex++;
+        total++;
+      }
+      html += escapeHtml(text.slice(last));
+      p.innerHTML = html;
+    });
+    marks = Array.prototype.slice.call(els.doc.querySelectorAll('.reading mark'));
+    els.count.textContent = total ? '1/' + total : '0';
+    if (marks.length) setActive(0);
+  }
+
+  function setActive(i) {
+    if (!marks.length) return;
+    if (active >= 0 && marks[active]) marks[active].classList.remove('on');
+    active = (i + marks.length) % marks.length;
+    marks[active].classList.add('on');
+    els.count.textContent = (active + 1) + '/' + marks.length;
+    marks[active].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  var searchTimer;
+  els.search.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    var q = els.search.value.trim();
+    searchTimer = setTimeout(function () { runSearch(q); }, 140);
+  });
+  els.search.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); setActive(active + (e.shiftKey ? -1 : 1)); }
+  });
+  els.next.addEventListener('click', function () { setActive(active + 1); });
+  els.prev.addEventListener('click', function () { setActive(active - 1); });
+
+  // --- Wiring --------------------------------------------------------------
+  function openPicker() { els.file.click(); }
+  document.getElementById('openBtn').addEventListener('click', openPicker);
+  document.getElementById('openBtn2').addEventListener('click', openPicker);
+  els.file.addEventListener('change', function () { loadFile(els.file.files[0]); });
+  document.getElementById('sampleBtn').addEventListener('click', function () { loadBytes(b64ToBytes(SAMPLE_B64), 'A Sample Document', true); });
+
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) { e.preventDefault(); els.drop.classList.add('drag'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      e.preventDefault();
+      if (ev === 'dragleave' && e.relatedTarget) return;
+      els.drop.classList.remove('drag');
+    });
+  });
+  document.addEventListener('drop', function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+
+  // Open with the sample loaded, so the first frame shows the reading view.
+  loadBytes(b64ToBytes(SAMPLE_B64), 'A Sample Document', true);
+})();
+</script>

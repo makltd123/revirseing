@@ -11,12 +11,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "build:browser": "esbuild browser/entry.js --bundle --format=iife --global-name=REA --alias:node:zlib=./browser/shim-zlib.js --alias:node:crypto=./browser/shim-crypto.js --inject:browser/buffer-inject.js --outfile=browser/rea.bundle.js"
   },
   "files": [
     "bin",
     "src",
     "README.md",
-    "LICENSE"
-  ]
+    "LICENSE",
+    "browser"
+  ],
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "pako": "^3.0.2",
+    "buffer": "^6.0.3"
+  }
 }
