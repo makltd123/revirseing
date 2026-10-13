@@ -1,0 +1,22 @@
+{
+  "name": "revirseing",
+  "version": "0.1.0",
+  "description": "A from-scratch PDF toolkit: inspect the structure of a PDF and extract its text, built directly against the ISO 32000 (PDF) file format.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "revirseing": "bin/revirseing.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}
