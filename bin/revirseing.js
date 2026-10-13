@@ -35,7 +35,7 @@ function main(argv) {
 function cmdInspect(args) {
   const opts = parseOpts(args, {
     flags: ['json', 'objects'],
-    values: ['object'],
+    values: ['object', 'password'],
   });
   const file = opts._[0];
   if (!file) {
@@ -43,9 +43,10 @@ function cmdInspect(args) {
     process.exit(1);
   }
   const buf = readFileSync(file);
+  const password = opts.password || '';
 
   if (opts.object !== undefined) {
-    const result = inspectObject(buf, parseInt(opts.object, 10));
+    const result = inspectObject(buf, parseInt(opts.object, 10), { password });
     if (opts.json) {
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     } else {
@@ -54,7 +55,7 @@ function cmdInspect(args) {
     return;
   }
 
-  const { report } = inspect(buf);
+  const { report } = inspect(buf, { password });
   if (opts.json) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } else {
@@ -64,8 +65,8 @@ function cmdInspect(args) {
 
 function cmdText(args) {
   const opts = parseOpts(args, {
-    flags: ['json', 'quiet'],
-    values: ['page'],
+    flags: ['json', 'quiet', 'layout'],
+    values: ['page', 'password'],
   });
   const file = opts._[0];
   if (!file) {
@@ -74,7 +75,7 @@ function cmdText(args) {
   }
   const buf = readFileSync(file);
   const pageNumbers = opts.page ? parsePageList(opts.page) : null;
-  const result = extractText(buf, { pageNumbers });
+  const result = extractText(buf, { pageNumbers, layout: opts.layout, password: opts.password || '' });
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -130,6 +131,7 @@ function renderReport(r, { objects }) {
   L(`  version       ${r.version ?? '(unknown)'}`);
   L(`  file size     ${r.fileSize} bytes`);
   L(`  xref source   ${r.recovered ? 'RECOVERED by scan (xref broken/absent)' : 'cross-reference table/stream'}`);
+  if (r.decryption) L(`  encryption    ${r.decryption}`);
   if (r.warnings.length) {
     L('  warnings:');
     for (const w of r.warnings) L(`    ! ${w}`);
@@ -147,6 +149,24 @@ function renderReport(r, { objects }) {
     L('  (no trailer)');
   }
   L();
+  if (r.metadata && (r.metadata.info || r.metadata.xmp)) {
+    L('Metadata');
+    L('─'.repeat(60));
+    if (r.metadata.info) {
+      for (const [k, v] of Object.entries(r.metadata.info)) {
+        L(`  ${k.padEnd(14)} ${String(v)}`);
+      }
+    }
+    if (r.metadata.xmp) {
+      L(`  XMP            ${r.metadata.xmp.bytes} bytes${r.metadata.xmp.fields ? '' : ' (no mapped fields)'}`);
+      if (r.metadata.xmp.fields) {
+        for (const [k, v] of Object.entries(r.metadata.xmp.fields)) {
+          L(`    ${k.padEnd(18)} ${v}`);
+        }
+      }
+    }
+    L();
+  }
   L('Cross-reference');
   L('─'.repeat(60));
   L(`  objects       ${r.xref.total}`);
@@ -228,6 +248,7 @@ Usage:
 
   revirseing text <file.pdf>               Extract text, page by page
   revirseing text <file.pdf> --page 2      One page (or 1,3-5)
+  revirseing text <file.pdf> --layout      Keep page layout (columns, gaps)
   revirseing text <file.pdf> --quiet       Text only, no headers or warnings
   revirseing text <file.pdf> --json        Text with line positions
 `);

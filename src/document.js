@@ -11,6 +11,7 @@ import {
   isRef, isDict, isStream, isArray, isName, dictGet,
 } from './model.js';
 import { decodeStream } from './filters.js';
+import { StandardSecurity } from './crypt.js';
 
 export class PDFDocument {
   constructor(buf) {
@@ -22,10 +23,14 @@ export class PDFDocument {
     this.recovered = false;
     this.version = null;
     this.warnings = [];
+    this.security = null;
+    this.encryptObjNum = null;
+    this.password = '';
   }
 
-  static load(buf) {
+  static load(buf, { password = '' } = {}) {
     const doc = new PDFDocument(buf);
+    doc.password = password;
     doc._readVersion();
     try {
       doc._readXref();
@@ -36,7 +41,60 @@ export class PDFDocument {
       doc.warnings.push(`xref parse failed: ${e.message}; recovering by scan`);
       doc._recoverByScan();
     }
+    doc._setupSecurity();
     return doc;
+  }
+
+  _setupSecurity() {
+    const encRef = this.trailer && dictGet(this.trailer, 'Encrypt');
+    if (!encRef) return;
+    if (isRef(encRef)) this.encryptObjNum = encRef.num;
+    const sec = new StandardSecurity(this, this.password);
+    if (sec.ok) {
+      this.security = sec;
+      // Values resolved during setup (e.g. the Encrypt dict) must not linger
+      // in the cache as if they had been decrypted; clear so reads re-run.
+      this.cache.clear();
+      this._objStmCache.clear();
+    } else {
+      this.warnings.push(`encrypted: ${sec.reason || 'could not derive key'}`);
+    }
+  }
+
+  // Walk a freshly parsed indirect object and decrypt its strings and stream
+  // bytes with the key for this object. Objects pulled from an object stream
+  // are already plaintext (the stream was decrypted as a whole), so only
+  // type-1 direct objects pass through here.
+  _decryptValue(value, num, gen) {
+    const sec = this.security;
+    if (!sec) return value;
+    const walk = (v) => {
+      if (v == null || typeof v !== 'object') return v;
+      switch (v.kind) {
+        case 'string':
+          v.bytes = sec.decrypt(v.bytes, num, gen, 'str');
+          return v;
+        case 'array':
+          v.items.forEach(walk);
+          return v;
+        case 'dict':
+          for (const val of v.map.values()) walk(val);
+          return v;
+        case 'stream': {
+          for (const val of v.dict.map.values()) walk(val);
+          // The /Metadata stream may be exempt when EncryptMetadata is false.
+          const typ = v.dict.map.get('Type');
+          const isMeta = typ && typ.kind === 'name' && typ.name === 'Metadata';
+          if (!(isMeta && !sec.encryptMetadata)) {
+            v.raw = sec.decrypt(v.raw, num, gen, 'stm');
+          }
+          return v;
+        }
+        default:
+          return v;
+      }
+    };
+    return walk(value);
   }
 
   _readVersion() {
@@ -228,6 +286,9 @@ export class PDFDocument {
       } else if (entry.type === 1) {
         const ind = parseIndirectAt(this.buf, entry.offset);
         value = ind.value;
+        if (this.security && obj.num !== this.encryptObjNum) {
+          value = this._decryptValue(value, obj.num, entry.gen || 0);
+        }
       } else if (entry.type === 2) {
         value = this._resolveFromObjStm(entry.streamNum, entry.index, obj.num);
       }
