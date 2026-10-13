@@ -290,3 +290,46 @@ end`;
   writeFileSync(out('layout.pdf'), pdf);
   console.log('wrote layout.pdf', pdf.length, 'bytes');
 }
+
+// ---- 7. AcroForm fields + annotations (links and a text note) ------------
+// Hand-built so the test needs no external producer: two text fields with
+// values, a link annotation with a URI, and a text-note annotation. Also an
+// XMP /Metadata stream in attribute form to exercise the XMP reader.
+{
+  const xmp = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:pdf="http://ns.adobe.com/pdf/1.3/"
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    pdf:Producer="revirseing-fixtures"
+    xmp:CreateDate="2026-01-02T03:04:05Z">
+   <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <rdf:Alt><rdf:li xml:lang="x-default">Fixture Form</rdf:li></rdf:Alt>
+   </dc:title>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+
+  const content = 'BT /F1 12 Tf 72 740 Td (Form fixture) Tj ET';
+  const pdf = buildPdf({
+    1: '<< /Type /Catalog /Pages 2 0 R /AcroForm 20 0 R /Metadata 21 0 R >>',
+    2: '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    3: '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /Annots [11 0 R 12 0 R 13 0 R] >>',
+    4: stream('', content),
+    5: `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica ${UNIFORM_WIDTHS} >>`,
+    // widget/field: full_name text field with a value
+    11: '<< /Type /Annot /Subtype /Widget /FT /Tx /T (full_name) /V (Ada Lovelace) /Rect [150 685 350 703] /Ff 2 >>',
+    // link annotation with a URI action
+    12: '<< /Type /Annot /Subtype /Link /Rect [130 714 320 730] /A << /S /URI /URI (https://example.org/signup) >> >>',
+    // text note annotation with contents
+    13: '<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /Contents (Reviewer note: check domain) >>',
+    // AcroForm with a second (choice) field as a direct child
+    20: '<< /Fields [11 0 R 14 0 R] >>',
+    14: '<< /FT /Ch /T (country) /V (UK) /Opt [[(UK) (United Kingdom)] [(US) (United States)]] >>',
+    21: stream('/Type /Metadata /Subtype /XML', xmp),
+  }, 1, '1.4');
+  writeFileSync(out('forms.pdf'), pdf);
+  console.log('wrote forms.pdf', pdf.length, 'bytes');
+}

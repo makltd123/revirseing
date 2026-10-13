@@ -50,13 +50,11 @@ function readXmp(doc) {
   // parser: these are the ones that map to the /Info fields.
   const fields = {};
   const add = (label, value) => { if (value && !(label in fields)) fields[label] = value; };
-  add('dc:title', rdfText(xml, 'dc:title'));
-  add('dc:creator', rdfText(xml, 'dc:creator'));
-  add('dc:description', rdfText(xml, 'dc:description'));
-  add('xmp:CreatorTool', tagText(xml, 'xmp:CreatorTool'));
-  add('xmp:CreateDate', tagText(xml, 'xmp:CreateDate'));
-  add('xmp:ModifyDate', tagText(xml, 'xmp:ModifyDate'));
-  add('pdf:Producer', tagText(xml, 'pdf:Producer'));
+  const SIMPLE = ['xmp:CreatorTool', 'xmp:CreateDate', 'xmp:ModifyDate', 'xmp:MetadataDate',
+    'pdf:Producer', 'pdf:Keywords', 'xmpMM:DocumentID', 'xmpMM:InstanceID'];
+  const RDF = ['dc:title', 'dc:creator', 'dc:description', 'dc:subject', 'dc:rights'];
+  for (const tag of RDF) add(tag, rdfText(xml, tag));
+  for (const tag of SIMPLE) add(tag, tagText(xml, tag) || attrVal(xml, tag));
   return {
     bytes: Buffer.byteLength(xml, 'utf8'),
     fields: Object.keys(fields).length ? fields : null,
@@ -100,6 +98,12 @@ function rdfText(xml, tag) {
   if (!block) return null;
   const li = /<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/.exec(block);
   return (li ? li[1] : block).trim() || null;
+}
+
+// Attribute-form XMP: <rdf:Description pdf:Producer="…" xmp:CreateDate="…">
+function attrVal(xml, prop) {
+  const m = new RegExp(`\\b${escapeTag(prop)}\\s*=\\s*"([^"]*)"`).exec(xml);
+  return m ? m[1].trim() || null : null;
 }
 
 function escapeTag(t) {

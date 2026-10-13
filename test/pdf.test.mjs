@@ -270,3 +270,42 @@ test('layoutText separates columns and blanks vertical gaps', () => {
   assert.ok(lines.length > 2);
   assert.equal(lines[lines.length - 1].trim(), 'C');
 });
+
+// --- forms and annotations ------------------------------------------------
+
+import { readForms } from '../src/inspect.js';
+
+test('forms: AcroForm fields with values, options, and flags', () => {
+  const r = readForms(read('forms.pdf'));
+  const byName = Object.fromEntries(r.fields.map((f) => [f.name, f]));
+  assert.ok(byName.full_name, 'text field present');
+  assert.equal(byName.full_name.type, 'text');
+  assert.equal(byName.full_name.value, 'Ada Lovelace');
+  assert.deepEqual(byName.full_name.flags, ['required']);
+  assert.equal(byName.country.type, 'choice');
+  assert.equal(byName.country.value, 'UK');
+  assert.deepEqual(byName.country.options, ['United Kingdom', 'United States']);
+});
+
+test('forms: link URI and text-note annotations', () => {
+  const r = readForms(read('forms.pdf'));
+  const link = r.annotations.find((a) => a.subtype === 'Link');
+  assert.equal(link.uri, 'https://example.org/signup');
+  const note = r.annotations.find((a) => a.subtype === 'Text');
+  assert.equal(note.contents, 'Reviewer note: check domain');
+});
+
+test('inspect: reports form-field and annotation counts', () => {
+  const { report } = inspect(read('forms.pdf'));
+  assert.equal(report.formFields, 2);
+  assert.ok(report.annotations >= 2);
+});
+
+test('metadata: XMP attribute form and nested dc:title are read', () => {
+  const { report } = inspect(read('forms.pdf'));
+  assert.ok(report.metadata.xmp);
+  const f = report.metadata.xmp.fields;
+  assert.equal(f['pdf:Producer'], 'revirseing-fixtures');
+  assert.equal(f['xmp:CreateDate'], '2026-01-02T03:04:05Z');
+  assert.equal(f['dc:title'], 'Fixture Form');
+});
