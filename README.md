@@ -3,8 +3,9 @@
 A from-scratch PDF toolkit. It reads a PDF the way the format actually works —
 parsing the byte-level object syntax, the cross-reference data, the stream
 filters, the content-stream operators and the font encodings by hand — then
-reports the file's structure and extracts its text. No PDF library is used;
-the only external code is Node's built-in `zlib` for FlateDecode.
+reports the file's structure, extracts its text, and can fill form fields and
+save the result. No PDF library is used; the only external code is Node's
+built-in `zlib` for FlateDecode.
 
 This is a learning-grade reverse-engineering tool aimed at an **open standard**
 (ISO 32000 / the PDF format). Understanding and reimplementing a documented
@@ -138,6 +139,8 @@ becomes a space.
 | `src/metadata.js` | `/Info` and XMP metadata extraction |
 | `src/crypt.js` | Standard security handler (RC4 / AES key derivation) |
 | `src/annotations.js` | AcroForm fields and page annotations |
+| `src/writer.js` | COS serialization and incremental-update writing |
+| `src/fill.js` | Form-field filling |
 | `src/document.js` | Cross-reference loading, resolution, page tree, recovery |
 | `src/inspect.js` | The `inspect` command |
 | `src/format.js` | Rendering objects for display |
@@ -203,12 +206,16 @@ become blank lines, so side-by-side columns stay side by side.
   are dropped rather than guessed.
 - Image filters (`DCTDecode`, `JPXDecode`, `CCITTFaxDecode`, `JBIG2Decode`)
   are reported but not decoded — there is no text in them.
+- Filled form values rely on the viewer honoring `/NeedAppearances`; `fill`
+  does not yet generate appearance streams itself, and it refuses to edit an
+  encrypted document (it does not re-encrypt).
 
 ## Roadmap
 
+- Appearance-stream generation for filled fields (so `/NeedAppearances` is not
+  required for the values to show).
 - Public-key security handler (`/Adobe.PubSec`).
-- Linearization (`/Linearized`) and object-stream rewriting on save.
-- A `save` path that applies edits (e.g. filled form values) back to a PDF.
+- Re-encrypting on save, so encrypted documents can be edited too.
 
 ## License
 
