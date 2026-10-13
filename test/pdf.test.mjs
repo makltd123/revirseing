@@ -309,3 +309,79 @@ test('metadata: XMP attribute form and nested dc:title are read', () => {
   assert.equal(f['xmp:CreateDate'], '2026-01-02T03:04:05Z');
   assert.equal(f['dc:title'], 'Fixture Form');
 });
+
+// --- writing: serialization, incremental update, form fill ----------------
+
+import { serialize, pdfTextString, incrementalUpdate } from '../src/writer.js';
+import { fillForm } from '../src/fill.js';
+import { Name, Dict, Ref, PdfArray } from '../src/model.js';
+
+test('serialize: names escape, refs, arrays and dicts', () => {
+  assert.equal(serialize(Name('Foo')).toString(), '/Foo');
+  assert.equal(serialize(Name('A B')).toString(), '/A#20B'); // space escaped
+  assert.equal(serialize(Ref(12, 0)).toString(), '12 0 R');
+  assert.equal(serialize(PdfArray([1, 2, Name('X')])).toString(), '[1 2 /X]');
+  const d = Dict(new Map([['Type', Name('Page')], ['N', 3]]));
+  assert.equal(serialize(d).toString(), '<< /Type /Page /N 3 >>');
+});
+
+test('pdfTextString: Latin-1 literal vs UTF-16BE for non-Latin', () => {
+  const ascii = pdfTextString('hello');
+  assert.equal(ascii.bytes.toString('latin1'), 'hello');
+  const cyr = pdfTextString('Привет');
+  // UTF-16BE BOM FE FF
+  assert.equal(cyr.bytes[0], 0xfe);
+  assert.equal(cyr.bytes[1], 0xff);
+});
+
+test('fillForm: sets values and appends an incremental update', () => {
+  const orig = read('forms.pdf');
+  const { buffer, applied, missing } = fillForm(orig, { full_name: 'Grace Hopper' });
+  assert.deepEqual(missing, []);
+  assert.equal(applied.length, 1);
+  // Append-only: the original is a byte-exact prefix.
+  assert.ok(buffer.subarray(0, orig.length).equals(orig), 'original bytes preserved');
+  assert.ok(buffer.length > orig.length);
+  // The new value reads back.
+  const r = readForms(buffer);
+  const f = r.fields.find((x) => x.name === 'full_name');
+  assert.equal(f.value, 'Grace Hopper');
+  // NeedAppearances was requested so viewers regenerate.
+  const doc = _Doc.load(buffer);
+  const acro = doc.resolve(doc.getCatalog().map.get('AcroForm'));
+  assert.equal(acro.map.get('NeedAppearances'), true);
+});
+
+test('fillForm: a missing field is reported, not applied', () => {
+  const { missing } = fillForm(read('forms.pdf'), { nope: 'x', full_name: 'Y' });
+  assert.deepEqual(missing, ['nope']);
+});
+
+test('incrementalUpdate: xref-stream document round-trips and stays append-only', () => {
+  const orig = read('xrefstream.pdf');
+  const doc = _Doc.load(orig);
+  assert.equal(doc.startxrefType, 'stream');
+  const page = doc.resolve(Ref(3, 0));
+  const newPage = Dict(new Map(page.map));
+  newPage.map.set('ReaMarker', Name('TouchedByWriter'));
+  const out = incrementalUpdate(doc, new Map([[3, { gen: 0, value: newPage }]]));
+  assert.ok(out.subarray(0, orig.length).equals(orig), 'append-only');
+  const doc2 = _Doc.load(out);
+  assert.equal(doc2.startxrefType, 'stream');
+  const marker = doc2.resolve(Ref(3, 0)).map.get('ReaMarker');
+  assert.equal(marker.name, 'TouchedByWriter');
+  assert.equal(doc2.getPages().length, 1);
+});
+
+test('incrementalUpdate: classic document round-trips', () => {
+  const orig = read('simple.pdf');
+  const doc = _Doc.load(orig);
+  assert.equal(doc.startxrefType, 'classic');
+  const cat = doc.resolve(Ref(1, 0));
+  const newCat = Dict(new Map(cat.map));
+  newCat.map.set('ReaMarker', Name('Edited'));
+  const out = incrementalUpdate(doc, new Map([[1, { gen: 0, value: newCat }]]));
+  assert.ok(out.subarray(0, orig.length).equals(orig));
+  const doc2 = _Doc.load(out);
+  assert.equal(doc2.resolve(Ref(1, 0)).map.get('ReaMarker').name, 'Edited');
+});

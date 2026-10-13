@@ -26,6 +26,7 @@ export class PDFDocument {
     this.security = null;
     this.encryptObjNum = null;
     this.password = '';
+    this.startxrefType = null; // 'classic' | 'stream' (of the most recent section)
   }
 
   static load(buf, { password = '' } = {}) {
@@ -147,9 +148,9 @@ export class PDFDocument {
     // Classic table begins with the keyword `xref`; otherwise it's an xref stream.
     const lex = new Lexer(this.buf, offset);
     const t = lex.next();
-    if (t.type === TokenType.KEYWORD && t.value === 'xref') {
-      return this._readClassicXref(lex.pos);
-    }
+    const isClassic = t.type === TokenType.KEYWORD && t.value === 'xref';
+    if (this.startxrefType === null) this.startxrefType = isClassic ? 'classic' : 'stream';
+    if (isClassic) return this._readClassicXref(lex.pos);
     return this._readXrefStream(offset);
   }
 

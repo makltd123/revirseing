@@ -9,6 +9,8 @@
 import { readFileSync } from 'node:fs';
 import { inspect, inspectObject, readForms } from '../src/inspect.js';
 import { extractText } from '../src/text.js';
+import { fillForm } from '../src/fill.js';
+import { writeFileSync } from 'node:fs';
 
 function main(argv) {
   const args = argv.slice(2);
@@ -29,6 +31,10 @@ function main(argv) {
 
   if (cmd === 'forms') {
     return cmdForms(args.slice(1));
+  }
+
+  if (cmd === 'fill') {
+    return cmdFill(args.slice(1));
   }
 
   process.stderr.write(`Unknown command: ${cmd}\n`);
@@ -64,6 +70,45 @@ function cmdInspect(args) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } else {
     renderReport(report, { objects: opts.objects });
+  }
+}
+
+function cmdFill(args) {
+  // Collect repeated --set name=value, plus --out and --password.
+  const sets = [];
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--set') { sets.push(args[++i]); } else { rest.push(args[i]); }
+  }
+  const opts = parseOpts(rest, { flags: ['json'], values: ['out', 'password'] });
+  const file = opts._[0];
+  if (!file) { process.stderr.write('fill: missing <file.pdf>\n'); process.exit(1); }
+  if (sets.length === 0) { process.stderr.write('fill: need at least one --set name=value\n'); process.exit(1); }
+
+  const values = {};
+  for (const pair of sets) {
+    const eq = pair.indexOf('=');
+    if (eq < 0) { process.stderr.write(`fill: bad --set "${pair}" (expected name=value)\n`); process.exit(1); }
+    const name = pair.slice(0, eq);
+    let v = pair.slice(eq + 1);
+    if (v === 'true') v = true; else if (v === 'false') v = false;
+    values[name] = v;
+  }
+
+  const buf = readFileSync(file);
+  const result = fillForm(buf, values, { password: opts.password || '' });
+  if (result.missing.length) {
+    for (const m of result.missing) process.stderr.write(`warning: no field named "${m}"\n`);
+  }
+  if (!result.buffer) { process.stderr.write('fill: nothing applied\n'); process.exit(1); }
+
+  const outPath = opts.out || file.replace(/\.pdf$/i, '') + '.filled.pdf';
+  writeFileSync(outPath, result.buffer);
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({ out: outPath, applied: result.applied, missing: result.missing, added: result.buffer.length - buf.length }, null, 2) + '\n');
+  } else {
+    for (const a of result.applied) process.stdout.write(`set ${a.name} = ${JSON.stringify(a.value)}\n`);
+    process.stdout.write(`wrote ${outPath} (+${result.buffer.length - buf.length} bytes, incremental update)\n`);
   }
 }
 
