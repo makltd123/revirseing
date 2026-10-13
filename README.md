@@ -98,8 +98,12 @@ becomes a space.
 - **Recovery** — if the cross-reference data is broken or missing, it scans the
   file for `N G obj` headers and rebuilds the object map, so the inspector still
   works on damaged files.
-- **Metadata** — the `/Info` dictionary and the `/Metadata` XMP stream, with
-  PDF text strings decoded from UTF-16BE or PDFDocEncoding and dates normalized.
+- **Metadata** — the `/Info` dictionary and the `/Metadata` XMP stream (element
+  and attribute forms, nested Dublin Core), with PDF text strings decoded from
+  UTF-16BE or PDFDocEncoding and dates normalized.
+- **Forms and annotations** — the AcroForm field tree (text, choice, button and
+  signature fields, with values, defaults, choice options and flags such as
+  required/readonly/multiline) and page annotations (link URIs, text notes).
 - **Encryption** — the standard security handler: V1/V2 (RC4), V4 (RC4 or
   AES-128 via crypt filters) and V5/R6 (AES-256). It runs the documented key
   derivation with the user password (empty by default, or `--password`), so a
@@ -133,6 +137,7 @@ becomes a space.
 | `src/text.js` | Line assembly, `--layout` mode, and the `text` command |
 | `src/metadata.js` | `/Info` and XMP metadata extraction |
 | `src/crypt.js` | Standard security handler (RC4 / AES key derivation) |
+| `src/annotations.js` | AcroForm fields and page annotations |
 | `src/document.js` | Cross-reference loading, resolution, page tree, recovery |
 | `src/inspect.js` | The `inspect` command |
 | `src/format.js` | Rendering objects for display |
@@ -157,6 +162,10 @@ the reader end-to-end against known bytes:
 | `encodings.pdf` | WinAnsi high bytes, `/Differences`, and a Type0 font whose two-byte codes resolve through a `/ToUnicode` CMap |
 | `layout.pdf` | `TJ` kerning vs. word gaps, `Tm`-placed columns, `TL`/`T*` leading, a Form XObject, and a page inheriting `/Resources` |
 
+A seventh fixture, `forms.pdf`, is hand-built with an AcroForm (a text field
+and a choice field), link and text-note annotations, and an XMP metadata
+stream in attribute form.
+
 Three encrypted fixtures (`enc-rc4-empty.pdf`, `enc-aes128-empty.pdf`,
 `enc-aes256-pw.pdf`) are produced by `test/make-encrypted-fixtures.py` using
 **pypdf** — an independent producer — so decryption is checked against bytes
@@ -173,7 +182,8 @@ case** (631, 47, 34 and 34 words respectively).
 
 Decryption was validated the same way: the 10-page document was encrypted with
 AES-256 (empty user password) by pypdf, and `revirseing` recovered all 631
-words identically. RC4-128, AES-128 and AES-256 (with a supplied password) all
+words identically. Form-field extraction was cross-checked against pypdf's
+`get_fields()` on a ReportLab-produced form — the field names and values match. RC4-128, AES-128 and AES-256 (with a supplied password) all
 round-trip; a wrong password is rejected rather than producing garbage.
 
 The one intended difference is reading order in multi-column blocks: `pypdf`
@@ -197,8 +207,8 @@ become blank lines, so side-by-side columns stay side by side.
 ## Roadmap
 
 - Public-key security handler (`/Adobe.PubSec`).
-- Full XMP parsing beyond the common mapped fields.
-- Annotations and form-field (AcroForm) text.
+- Linearization (`/Linearized`) and object-stream rewriting on save.
+- A `save` path that applies edits (e.g. filled form values) back to a PDF.
 
 ## License
 

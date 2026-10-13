@@ -7,7 +7,7 @@
 // on the same parser.
 
 import { readFileSync } from 'node:fs';
-import { inspect, inspectObject } from '../src/inspect.js';
+import { inspect, inspectObject, readForms } from '../src/inspect.js';
 import { extractText } from '../src/text.js';
 
 function main(argv) {
@@ -25,6 +25,10 @@ function main(argv) {
 
   if (cmd === 'text') {
     return cmdText(args.slice(1));
+  }
+
+  if (cmd === 'forms') {
+    return cmdForms(args.slice(1));
   }
 
   process.stderr.write(`Unknown command: ${cmd}\n`);
@@ -60,6 +64,41 @@ function cmdInspect(args) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } else {
     renderReport(report, { objects: opts.objects });
+  }
+}
+
+function cmdForms(args) {
+  const opts = parseOpts(args, { flags: ['json'], values: ['password'] });
+  const file = opts._[0];
+  if (!file) {
+    process.stderr.write('forms: missing <file.pdf>\n');
+    process.exit(1);
+  }
+  const result = readForms(readFileSync(file), { password: opts.password || '' });
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    return;
+  }
+  const L = (s = '') => process.stdout.write(s + '\n');
+  L('Form fields');
+  L('─'.repeat(60));
+  if (result.fields.length === 0) L('  (none)');
+  for (const f of result.fields) {
+    let line = `  ${f.type.padEnd(10)} ${f.name}`;
+    if (f.value !== undefined) line += ` = ${JSON.stringify(f.value)}`;
+    if (f.flags) line += `  [${f.flags.join(', ')}]`;
+    L(line);
+    if (f.options) L(`             options: ${f.options.join(', ')}`);
+  }
+  L();
+  L('Annotations');
+  L('─'.repeat(60));
+  if (result.annotations.length === 0) L('  (none)');
+  for (const a of result.annotations) {
+    let line = `  p${a.page} ${a.subtype}`;
+    if (a.uri) line += `  -> ${a.uri}`;
+    if (a.contents) line += `  "${a.contents.replace(/\s+/g, ' ').slice(0, 60)}"`;
+    L(line);
   }
 }
 
@@ -172,6 +211,11 @@ function renderReport(r, { objects }) {
   L(`  objects       ${r.xref.total}`);
   L(`  direct        ${r.xref.direct}`);
   L(`  in objstm     ${r.xref.inObjectStreams}`);
+  if (r.formFields || r.annotations) {
+    L();
+    L(`  form fields   ${r.formFields}`);
+    L(`  annotations   ${r.annotations}`);
+  }
   L();
   L('Pages');
   L('─'.repeat(60));

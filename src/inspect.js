@@ -8,6 +8,9 @@ import {
 import { decodeStream } from './filters.js';
 import { short, pretty, classify } from './format.js';
 import { readMetadata } from './metadata.js';
+import { extractFormFields, extractAnnotations } from './annotations.js';
+
+function safe(fn) { try { return fn(); } catch { return null; } }
 
 export function inspect(buf, { password = '' } = {}) {
   const doc = PDFDocument.load(buf, { password });
@@ -25,6 +28,10 @@ export function inspect(buf, { password = '' } = {}) {
       ? (doc.security ? 'decrypted (standard handler)' : 'LOCKED — password required')
       : null,
   };
+  const fields = safe(() => extractFormFields(doc));
+  const annots = safe(() => extractAnnotations(doc));
+  report.formFields = fields ? fields.length : 0;
+  report.annotations = annots ? annots.length : 0;
   return { doc, report };
 }
 
@@ -118,4 +125,14 @@ function previewBytes(buf, max = 400) {
     ? slice.toString('latin1')
     : slice.toString('hex').replace(/(..)/g, '$1 ').trim();
   return (buf.length > max ? text + '\n…' : text);
+}
+
+
+export function readForms(buf, { password = '' } = {}) {
+  const doc = PDFDocument.load(buf, { password });
+  return {
+    fields: extractFormFields(doc) || [],
+    annotations: extractAnnotations(doc) || [],
+    warnings: doc.warnings,
+  };
 }
