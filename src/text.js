@@ -9,8 +9,8 @@
 import { PDFDocument } from './document.js';
 import { TextExtractor } from './content.js';
 
-export function extractText(buf, { pageNumbers = null } = {}) {
-  const doc = PDFDocument.load(buf);
+export function extractText(buf, { pageNumbers = null, layout = false, password = '' } = {}) {
+  const doc = PDFDocument.load(buf, { password });
   const pages = doc.getPages();
   const extractor = new TextExtractor(doc);
   const out = [];
@@ -27,7 +27,7 @@ export function extractText(buf, { pageNumbers = null } = {}) {
     out.push({
       page: i + 1,
       lines,
-      text: lines.map((l) => l.text).join('\n'),
+      text: layout ? layoutText(items) : lines.map((l) => l.text).join('\n'),
       itemCount: items.length,
     });
   });
@@ -91,4 +91,60 @@ export function assembleLines(items) {
 
 function round(n) {
   return Math.round(n * 100) / 100;
+}
+
+
+// Spatial rendering: keep columns where they sit on the page by turning
+// device-space x into character columns and vertical gaps into blank lines.
+// Approximate by construction — fonts are proportional — but it preserves the
+// side-by-side structure that assembleLines deliberately flattens.
+export function layoutText(items, { charWidth = null } = {}) {
+  if (items.length === 0) return '';
+
+  // Estimate a character cell width from the median glyph advance.
+  const advances = items
+    .filter((it) => it.text.length > 0)
+    .map((it) => it.width / it.text.length)
+    .filter((w) => w > 0)
+    .sort((a, b) => a - b);
+  const cell = charWidth || (advances.length ? advances[Math.floor(advances.length / 2)] : 5) || 5;
+
+  // Cluster into baseline rows (same tolerance as assembleLines).
+  const sorted = [...items].sort((a, b) => (b.y - a.y) || (a.x - b.x));
+  const rows = [];
+  let current = null;
+  for (const item of sorted) {
+    const tol = Math.max(1, (item.fontSize || 10) * 0.4);
+    if (current && Math.abs(item.y - current.y) <= tol) {
+      current.items.push(item);
+    } else {
+      current = { y: item.y, fontSize: item.fontSize || 10, items: [item] };
+      rows.push(current);
+    }
+  }
+
+  const minX = Math.min(...items.map((it) => it.x));
+  const out = [];
+  let prevY = null;
+  for (const row of rows) {
+    // Blank lines for a vertical gap bigger than roughly one line height.
+    if (prevY !== null) {
+      const gap = prevY - row.y;
+      const lh = row.fontSize * 1.2;
+      const blanks = Math.min(5, Math.max(0, Math.round(gap / lh) - 1));
+      for (let i = 0; i < blanks; i++) out.push('');
+    }
+    prevY = row.y;
+
+    row.items.sort((a, b) => a.x - b.x);
+    let line = '';
+    for (const it of row.items) {
+      const col = Math.max(0, Math.round((it.x - minX) / cell));
+      if (col > line.length) line += ' '.repeat(col - line.length);
+      // If the slot is occupied (overlap), fall back to a single space.
+      line += (line.length > 0 && col <= line.length && !/\s$/.test(line) ? ' ' : '') + it.text;
+    }
+    out.push(line.replace(/\s+$/, ''));
+  }
+  return out.join('\n');
 }

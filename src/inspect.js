@@ -7,18 +7,23 @@ import {
 } from './model.js';
 import { decodeStream } from './filters.js';
 import { short, pretty, classify } from './format.js';
+import { readMetadata } from './metadata.js';
 
-export function inspect(buf) {
-  const doc = PDFDocument.load(buf);
+export function inspect(buf, { password = '' } = {}) {
+  const doc = PDFDocument.load(buf, { password });
   const report = {
     version: doc.version,
     fileSize: buf.length,
     recovered: doc.recovered,
     warnings: doc.warnings,
     trailer: summarizeTrailer(doc),
+    metadata: readMetadata(doc),
     xref: summarizeXref(doc),
     objects: summarizeObjects(doc),
     pages: summarizePages(doc),
+    decryption: doc.trailer && dictGet(doc.trailer, 'Encrypt')
+      ? (doc.security ? 'decrypted (standard handler)' : 'LOCKED — password required')
+      : null,
   };
   return { doc, report };
 }
@@ -88,8 +93,8 @@ function summarizePages(doc) {
 }
 
 // Resolve + fully show one object by number (for `inspect --object N`).
-export function inspectObject(buf, num) {
-  const doc = PDFDocument.load(buf);
+export function inspectObject(buf, num, { password = '' } = {}) {
+  const doc = PDFDocument.load(buf, { password });
   const obj = doc.resolve({ kind: 'ref', num, gen: 0 });
   const out = { num, type: classify(obj), rendered: pretty(obj) };
   if (isStream(obj)) {

@@ -98,6 +98,14 @@ becomes a space.
 - **Recovery** — if the cross-reference data is broken or missing, it scans the
   file for `N G obj` headers and rebuilds the object map, so the inspector still
   works on damaged files.
+- **Metadata** — the `/Info` dictionary and the `/Metadata` XMP stream, with
+  PDF text strings decoded from UTF-16BE or PDFDocEncoding and dates normalized.
+- **Encryption** — the standard security handler: V1/V2 (RC4), V4 (RC4 or
+  AES-128 via crypt filters) and V5/R6 (AES-256). It runs the documented key
+  derivation with the user password (empty by default, or `--password`), so a
+  document that opens without a password in any reader opens here too, and
+  reports `LOCKED` when the password is needed and not supplied. It recovers no
+  password and breaks no cipher.
 - **Page tree** — walks `/Pages` into a flat list of pages with inherited
   attributes.
 - **Content streams** — the operators that place text: `BT`/`ET`, `Tf`, `Td`,
@@ -122,7 +130,9 @@ becomes a space.
 | `src/content.js` | Content-stream interpreter and text positioning |
 | `src/font.js` | Font decoding, CMap parsing, glyph widths |
 | `src/encodings.js` | Base encodings and glyph-name to Unicode mapping |
-| `src/text.js` | Line assembly and the `text` command |
+| `src/text.js` | Line assembly, `--layout` mode, and the `text` command |
+| `src/metadata.js` | `/Info` and XMP metadata extraction |
+| `src/crypt.js` | Standard security handler (RC4 / AES key derivation) |
 | `src/document.js` | Cross-reference loading, resolution, page tree, recovery |
 | `src/inspect.js` | The `inspect` command |
 | `src/format.js` | Rendering objects for display |
@@ -147,6 +157,12 @@ the reader end-to-end against known bytes:
 | `encodings.pdf` | WinAnsi high bytes, `/Differences`, and a Type0 font whose two-byte codes resolve through a `/ToUnicode` CMap |
 | `layout.pdf` | `TJ` kerning vs. word gaps, `Tm`-placed columns, `TL`/`T*` leading, a Form XObject, and a page inheriting `/Resources` |
 
+Three encrypted fixtures (`enc-rc4-empty.pdf`, `enc-aes128-empty.pdf`,
+`enc-aes256-pw.pdf`) are produced by `test/make-encrypted-fixtures.py` using
+**pypdf** — an independent producer — so decryption is checked against bytes
+this project did not itself encrypt, not its own round-trip. They are committed
+because regenerating them needs pypdf.
+
 ### Checked against other implementations
 
 Text extraction was also run against PDFs from four unrelated producers — a
@@ -155,14 +171,22 @@ Text extraction was also run against PDFs from four unrelated producers — a
 compared with `pypdf`. The multiset of extracted words was **identical in every
 case** (631, 47, 34 and 34 words respectively).
 
+Decryption was validated the same way: the 10-page document was encrypted with
+AES-256 (empty user password) by pypdf, and `revirseing` recovered all 631
+words identically. RC4-128, AES-128 and AES-256 (with a supplied password) all
+round-trip; a wrong password is rejected rather than producing garbage.
+
 The one intended difference is reading order in multi-column blocks: `pypdf`
 follows content-stream order, while `revirseing` groups fragments by baseline,
-so text sharing a baseline shares a line.
+so text sharing a baseline shares a line. `--layout` keeps the spatial
+arrangement instead: x-positions become character columns and vertical gaps
+become blank lines, so side-by-side columns stay side by side.
 
 ## Limitations
 
-- **Encrypted documents** are detected and reported, but strings and streams
-  are not decrypted, so their text will not come out.
+- **Encryption** covers the standard security handler only; public-key
+  (`/Filter /Adobe.PubSec`) and other custom handlers are reported but not
+  opened.
 - **Reading order** is geometric. Rotated text, and text set along a curve or
   in overlapping layers, will not group the way a human reads it.
 - **CID fonts with no `/ToUnicode`** carry no recoverable Unicode; those codes
@@ -172,9 +196,9 @@ so text sharing a baseline shares a line.
 
 ## Roadmap
 
-- Encrypted-document handling (RC4 / AES) for the standard security handler.
-- `/Metadata` (XMP) and `/Info` dictionary reporting.
-- `--layout` mode preserving column structure instead of joining baselines.
+- Public-key security handler (`/Adobe.PubSec`).
+- Full XMP parsing beyond the common mapped fields.
+- Annotations and form-field (AcroForm) text.
 
 ## License
 
