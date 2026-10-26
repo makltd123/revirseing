@@ -172,3 +172,7 @@ warnings. The browser build is checked in headless Chromium.
 
 [MIT](LICENSE). Built against the public ISO 32000 (PDF) specification, for
 lawful analysis of PDFs you own or are authorized to examine.
+
+---
+
+Author: [Fedor Makovskiy](https://fedor.alqira.ru), AI developer. Services and projects with quality metrics: [fedor.alqira.ru](https://fedor.alqira.ru).
